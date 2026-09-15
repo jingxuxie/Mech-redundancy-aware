@@ -1,0 +1,7 @@
+{
+  "command": "PYTHONPATH=src pytest -q",
+  "passed": 42,
+  "failed": 0,
+  "elapsed_seconds": 0.5,
+  "date": "2026-09-15"
+}

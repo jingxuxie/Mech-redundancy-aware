@@ -1,0 +1,8 @@
+# Versions used for the recorded CPU experiment run, Python 3.13.5.
+# The recorded PyTorch build was 2.10.0+cpu; select a compatible CPU wheel.
+numpy==2.3.5
+scipy==1.17.0
+pandas==2.2.3
+matplotlib==3.10.8
+torch==2.10.0
+pytest>=7.0

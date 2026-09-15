@@ -1,0 +1,662 @@
+\documentclass[10pt]{article}
+\usepackage[letterpaper,margin=0.92in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern,microtype,amsmath,amssymb,amsthm,mathtools}
+\usepackage{graphicx,booktabs,array,natbib,enumitem,fancyhdr}
+\usepackage[hidelinks]{hyperref}
+\usepackage[font=small,labelfont=bf]{caption}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+\setlength{\headheight}{14pt}
+\pagestyle{fancy}\fancyhf{}
+\fancyhead[L]{\small Finding Is Not Certifying}
+\fancyhead[R]{\small Research manuscript v0.1}
+\fancyfoot[C]{\thepage}
+\newtheorem{theorem}{Theorem}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{corollary}[theorem]{Corollary}
+\newtheorem{lemma}[theorem]{Lemma}
+\theoremstyle{definition}\newtheorem{definition}[theorem]{Definition}
+\newcommand{\HH}{\mathcal H}
+\newcommand{\KK}{\mathcal K}
+\newcommand{\NN}{\mathcal N}
+\newcommand{\UU}{\mathcal U}
+\newcommand{\VV}{\mathcal V}
+\newcommand{\II}{\mathcal I}
+\newcommand{\FF}{\mathcal F}
+\newcommand{\ind}{\mathbf 1}
+\newcommand{\Cert}{\operatorname{Cert}}
+\newcommand{\rank}{\operatorname{rank}}
+\newcommand{\E}{\mathbb E}
+\newcommand{\Prb}{\mathbb P}
+\title{\vspace{-1.2em}Finding Is Not Certifying:\\Query-Limited Audits of Redundant Mechanisms}
+\author{Anonymous research manuscript}
+\date{15 September 2026}
+\begin{document}
+\maketitle
+\begin{abstract}
+Single-component interventions can miss joint dependencies, but finding a hidden
+dependency and establishing that no others remain are different problems. We study
+complete recovery of minimal harmful ablation sets for a fixed network, intervention
+policy, and behavioral threshold. Under monotonicity and a declared interaction-order
+bound, we characterize the smallest intervention radius permitting identification and
+the exact size of a truthful identifying certificate. Building on classical independent
+covers, we analyze a coverage-directed audit whose query cost is bounded by a harmonic
+factor times the optimal negative certificate, plus an additive edge-extraction cost.
+The argument spans all discovery phases and allows arbitrary overlap. We also show
+that a network with only disjoint pair failures can require exponentially many
+negative tests when higher-order alternatives must be excluded, despite admitting
+logarithmic-size negative certificates under a trusted rank-two assumption.
+Exhaustive finite-hypothesis checks, 2,880 synthetic audits, and audits of 20 small
+trained networks validate the statements and expose their limits. Coverage-directed
+queries improve the average synthetic query count over a matched random scheduler,
+but do not uniformly improve neural-network auditing. Explicit cancellation and
+rank-misspecification controls show why transcript consistency alone cannot justify
+the assumptions behind a completeness claim.
+\end{abstract}
+
+\section{Introduction}
+A model can retain its behavior after removing either of two computational pathways,
+yet change substantially when both are removed. An importance score computed from
+single ablations need not reveal this joint dependency. Conditional co-ablation already
+uses interventions to recover compensating mechanisms in transformers
+\citep{gong2026}. The outstanding question we study is narrower than whether redundancy
+exists: \emph{what intervention evidence licenses a claim that the relevant joint
+dependencies have all been found?}
+
+Finding one sufficient circuit, identifying individually influential components, and
+recovering a complete family of joint failure sets are different objectives. If
+pathways $\{1,2\}$ and $\{3,4\}$ are individually sufficient, their four cross-pathway
+pairs are minimal harmful ablations. A pruning method returning either pathway may
+be correct for its own objective while not characterizing all these dependencies.
+We therefore evaluate recovery of a thresholded intervention-response function,
+not the size of one retained subnetwork.
+
+The mathematical connection to hidden-hypergraph learning is established, not new.
+In particular, \citet{angluin2006} explain why negative queries must form an independent
+cover and how positive group tests can reveal new edges. Our contribution is an
+instance-relative audit analysis that keeps three quantities separate: the intervention
+ceiling, the order of alternatives excluded by the certificate, and the number of
+measurements actually required. The resulting guarantees are conditional statements
+about a specified intervention protocol, not identification of a unique semantic
+algorithm inside a network.
+
+We provide an exact identifiability-radius characterization and a certificate-complexity
+identity. We then prove a global harmonic bound for an adaptive coverage-directed
+scheduler, without multiplying the negative-certificate cost by the number of
+discovered edges. A disjoint-pair construction isolates the potentially exponential
+cost of excluding higher-order alternatives. Finally, our small, fully enumerable
+experiments distinguish discovering all true edges from knowing that this has happened,
+and test failures of the assumptions rather than silently treating them as universal.
+
+\section{Problem and scope}
+Fix a frozen model $f$, a distribution $P$, $n$ intervention units, and a replacement
+policy. For $A\subseteq[n]$, let $f^{(-A)}$ denote the intervened model and define
+\begin{equation}
+ D(A)=\E_{x\sim P}\big[\ell(f(x),f^{(-A)}(x))\big],\qquad
+ B(A)=\ind\{D(A)>\tau\},\quad \ell\in[0,1].
+ \label{eq:behavior}
+\end{equation}
+Here ``failure'' means a specified behavioral deviation from $f$, not necessarily a
+reduction in task accuracy. We require $B(\varnothing)=0$. Our initial oracle returns
+exact $B(A)$; Section~\ref{sec:noise} treats sampled losses.
+
+\textbf{Structural assumptions.} We assume monotonicity,
+$A\subseteq A'\Rightarrow B(A)\le B(A')$. Let $\HH$ be the antichain of inclusion-minimal
+positive masks. Then
+\begin{equation}
+ B_{\HH}(A)=\bigvee_{e\in\HH}\ind\{e\subseteq A\}.
+ \label{eq:hypergraph}
+\end{equation}
+The declared hypothesis class contains \emph{all} such functions with
+$\rank(\HH)=\max_{e\in\HH}|e|\le r$, with rank zero for the empty family. There is no
+supplied edge-count bound: $s=|\HH|$ is a property of the target, not an input to the
+audit. A known tight edge-count bound changes our lower-bound class.
+
+Queries obey $|A|\le b$. We count distinct nonempty masks separately from the number
+of input evaluations needed to label each mask. Small $b$ is a cardinality constraint;
+it does not establish that interventions are on-manifold. Monotonicity and rank are
+not inferred from successful reconstruction or a clean accuracy score. Lower bounds
+apply to intervention-oracle evidence, not arbitrary weight inspection.
+
+\textbf{Candidate and certificate objects.} Write
+\begin{equation}
+ \VV_r=\{T\subseteq[n]:1\le |T|\le r\},\qquad
+ \II_r(\HH)=\{T\in\VV_r:B_{\HH}(T)=0\},\quad M=|\II_r(\HH)|.
+\end{equation}
+Let $\alpha(\HH)=\max\{|A|:B_{\HH}(A)=0\}$ be the largest harmless intervention size.
+Define $C_{b,r}(\HH)$ as the minimum number of negative masks of size at most $b$
+covering every member of $\II_r(\HH)$ by containment. Set $C=0$ if $M=0$ and $C=\infty$
+if no such cover exists. This is a cardinality-constrained version of the independent
+cover of \citet{angluin2006}. These quantities are used for analysis and evaluation;
+the algorithm is not supplied with the true hypergraph or its optimal cover.
+
+\section{What can the intervention domain identify?}
+\begin{theorem}[Sharp identifiability radius]\label{thm:radius}
+For a target $\HH$ of rank at most $r$, its full response table on masks of size at
+most $b$ uniquely identifies it within the declared hypothesis class if and only if
+\begin{equation}
+ b\ \ge\ b_*(\HH;r):=\max\{\rank(\HH),\min(r,\alpha(\HH))\}.
+ \label{eq:radius}
+\end{equation}
+\end{theorem}
+\begin{proof}
+If a minimal edge $e$ has $|e|>b$, removing $e$ from the target changes no allowed
+response. If $r>b$ and $\alpha(\HH)>b$, choose a harmless $T$ of size $b+1$; adding
+the term $\ind\{T\subseteq A\}$ preserves all allowed responses but changes the
+response at $T$. Removing subsumed terms leaves an antichain of rank at most $r$.
+These alternatives prove necessity.
+Conversely, under~\eqref{eq:radius}, all true edges and all negative candidates in
+$\VV_r$ are queryable. Their labels determine all positive and negative members of
+$\VV_r$. Every positive mask of a rank-at-most-$r$ monotone function contains a
+positive candidate in $\VV_r$, so the entire function is determined.
+\end{proof}
+The usual condition $b\ge r$ is sufficient uniformly over the class, but is not
+necessary for every instance. For six disjoint failure pairs, actual rank is two
+and $\alpha=6$. Thus $b=6$ allows a rank-unrestricted certificate on twelve units;
+$b<6$ does not. The largest observed failure order alone does not determine this
+threshold.
+
+\begin{theorem}[Exact identifying-certificate complexity]\label{thm:certificate}
+When~\eqref{eq:radius} holds, the smallest truthful transcript uniquely identifying
+$\HH$ has
+\begin{equation}
+ \Cert_{b,r}(\HH)=C_{b,r}(\HH)+s
+ \label{eq:certificate}
+\end{equation}
+nonempty queries. Otherwise no allowed identifying transcript exists.
+\end{theorem}
+\begin{proof}
+If some $T\in\II_r(\HH)$ is contained in no observed negative query, adding $T$ as a
+positive term preserves the transcript while changing the function. Therefore the
+negative queries form a cover and number at least $C_{b,r}(\HH)$. For each $e\in\HH$,
+some positive query must contain $e$ and no other edge, or removing $e$ preserves
+the transcript. A query can isolate at most one edge, so there are at least $s$
+positive queries. This proves the lower bound.
+For the upper bound, query all true minimal edges and an optimal negative cover.
+An alternative consistent function must keep every true edge positive, and every
+member of $\II_r(\HH)$ negative. Hence it agrees on $\VV_r$ and everywhere.
+The necessity part of Theorem~\ref{thm:radius} rules out certificates otherwise.
+\end{proof}
+The negative-cover lower bound is classical; we state its exact certificate form
+for the audit domain. An optimal certificate depends on the true target. Equation~
+\eqref{eq:certificate} is not an algorithm that knows which optimal queries to ask.
+
+\subsection{An independently checkable residual}
+For discovered, verified edges $\KK$ and observed negative masks $\NN$, maintain
+\begin{equation}
+ \UU(\KK,\NN)=\{T\in\VV_r:
+       \nexists e\in\KK\text{ with }e\subseteq T,\quad
+       \nexists A\in\NN\text{ with }T\subseteq A\}.
+ \label{eq:residual}
+\end{equation}
+An edge has a positive witness and negative witnesses for each single-element
+deletion; a negative superset of a deletion is sufficient under monotonicity.
+Also require every queried positive to contain a verified edge. Then $\UU=\varnothing$
+is a complete certificate in the declared class. If $T\in\UU$, $B_{\KK}$ and
+$B_{\KK}\vee\ind\{T\subseteq A\}$ both fit the transcript but disagree at $T$.
+The alternative can be minimized without exceeding rank $r$.
+
+Our checker validates query-domain membership, absence of positive-subset/negative-
+superset contradictions, minimality witnesses, explained positives, the rank of the
+reported edges, and an empty residual. It does not establish global monotonicity or
+validate an unobserved rank bound. Detecting no contradiction is not a proof of
+either assumption.
+
+\section{Coverage-directed discovery with a global query bound}
+For an allowed mask avoiding all found edges, define
+\begin{equation}
+ g(A;\UU)=|\{T\in\UU:T\subseteq A\}|.
+\end{equation}
+Our scheduler chooses a mask maximizing this score. A negative answer removes its
+candidate subsets. A positive answer is shrunk to a minimal positive by restoring
+one component at a time, retaining each restoration that leaves the mask positive.
+All negative answers during shrinking also update the residual. The new edge removes
+all of its candidate supersets. The process ends only when no residual candidates
+remain, or reports a budget/domain/measurement limitation.
+
+\begin{center}
+\begin{minipage}{0.94\linewidth}
+\hrule\vspace{5pt}
+\textbf{Coverage-directed audit}\quad Inputs: $n,r,b$, oracle, query budget.\\
+Initialize $\KK=\NN=\varnothing$, $\UU=\VV_r$.\\
+While $\UU\ne\varnothing$:\\
+\hspace*{1em}Choose $A\in\arg\max\{g(A;\UU):|A|\le b,\ \forall e\in\KK,\ e\nsubseteq A\}$.\\
+\hspace*{1em}If the maximum is zero, report unresolved candidates and stop.\\
+\hspace*{1em}Query $B(A)$, or abstain if its label cannot be resolved.\\
+\hspace*{1em}If negative, add $A$ to $\NN$.\\
+\hspace*{1em}If positive, deletion-shrink $A$ to $e$; add all shrink negatives to $\NN$; add $e$ to $\KK$.\\
+\hspace*{1em}Recompute $\UU$ using~\eqref{eq:residual}.\\
+Return $\KK$ with the labeled transcript and conditional certificate.\vspace{5pt}\hrule
+\end{minipage}
+\end{center}
+
+\begin{theorem}[Global certificate-relative query bound]\label{thm:greedy}
+Assume exact labels, exact score maximization, and~\eqref{eq:radius}. Let
+\begin{equation}
+ d=\min\left\{M,\sum_{j=1}^{\min(r,b)}\binom bj\right\},\qquad
+ h_d=\sum_{j=1}^d\frac1j,\quad h_0=0.
+\end{equation}
+Coverage-directed auditing recovers $\HH$ and certifies completeness using at most
+\begin{equation}
+ Q\le h_d C_{b,r}(\HH)+(b+1)s.
+ \label{eq:mainbound}
+\end{equation}
+In particular, $Q/\Cert_{b,r}(\HH)\le\max\{h_d,b+1\}$.
+\end{theorem}
+\begin{proof}
+\emph{Correctness and progress.} A positive outer mask contains no previously found
+edge. Deletion shrinking therefore finds a new true edge. If a deletion tested
+negative before subsequent restorations, its final counterpart is a subset of that
+negative mask and remains negative. Hence the returned edge is minimal.
+If a residual candidate is positive, it contains an undiscovered, queryable edge;
+querying that edge is feasible with positive score. If a residual candidate is
+negative, some mask in an optimal negative cover contains it; this mask avoids all
+found edges and also has positive score. Thus the algorithm progresses until the
+residual is empty. Each original positive pool contains its extracted edge, so the
+transcript certificate is valid.
+
+\emph{One charge across all discovery phases.} Fix an optimal negative cover $\FF$
+and assign each member of $\II_r(\HH)$ to one covering mask, yielding disjoint blocks
+$P_F$ with $|P_F|\le d$. True-negative candidates disappear only through negative
+queries, never by discovery of a true edge. Every $F\in\FF$ remains feasible at
+all times. On an outer negative query, suppose the chosen mask covers $k$ residual
+candidates. All $k$ are true negatives. Greedy optimality implies that $k$ is at
+least the number $q$ of unresolved elements in any fixed block $P_F$.
+Charge $1/k$ to each of the $k$ eliminated candidates. When $t$ elements of a block
+with $q$ elements remaining are removed, its charge is at most
+\begin{equation}
+ \frac tq\le\sum_{j=q-t+1}^{q}\frac1j.
+\end{equation}
+Shrink-generated negative queries can delete additional block elements at zero
+charge. Therefore, over the entire run, each block accrues at most $h_{|P_F|}\le h_d$.
+The total number of outer negative queries is at most $C_{b,r}(\HH)h_d$.
+There are at most $s$ outer positive queries, each followed by at most $b$ deletion
+queries. Adding these costs proves~\eqref{eq:mainbound}. Caching only reduces calls.
+\end{proof}
+This uses the classical harmonic set-cover charge \citep{chvatal1979}, but the
+cover's negative members are unknown to the algorithm and positive discoveries
+change the feasible domain. Fixing the true negative cover throughout the proof
+avoids paying its cost again after each discovery. The argument makes no overlap
+or maximum-degree assumption.
+
+\begin{corollary}[Approximate selection and alternative extraction]
+If every chosen mask attains at least $1/a$ of the maximum score, the first term in
+\eqref{eq:mainbound} becomes $a h_d C_{b,r}(\HH)$. If a correct minimal-edge extractor
+uses at most $L$ additional queries per positive pool, the second term becomes
+$(L+1)s$.
+\end{corollary}
+The first claim follows by replacing $k\ge q$ with $k\ge q/a$ in the same charge.
+The second follows by replacing the extraction accounting. A practical heuristic
+is not automatically assigned an approximation factor. Our implementation enumerates
+$\sum_{j\le r}\binom nj$ candidates and $\sum_{j\le b}\binom nj$ masks; we claim a query
+bound, not a polynomial-time method for unrestricted $n,r,b$. Existing efficient
+hidden-hypergraph algorithms remain relevant alternatives \citep{angluin2006,abasi2014,chen2026}.
+
+\section{The cost of excluding higher-order alternatives}
+The declared order bound can matter far more than the actual order of the target.
+Let $\HH_m$ consist of $m\ge2$ disjoint pairs on $n=2m$ components. Every component
+participates and the true rank is two. Its maximal negative masks choose exactly
+one component from each pair and have size $m$.
+
+\begin{theorem}[Rank uncertainty and binary covering arrays]\label{thm:rankgap}
+For $b\ge m$, $2\le r\le2m$, and $t=\min(r,m)$, $C_{b,r}(\HH_m)$ equals the smallest
+number of rows in a binary strength-$t$ covering array with $m$ columns. In particular,
+\begin{equation}
+ C_{b,2m}(\HH_m)=2^m,\qquad
+ C_{b,2}(\HH_m)\le2+2\lceil\log_2m\rceil,\qquad C_{b,r}(\HH_m)\ge2^t.
+ \label{eq:rankgap}
+\end{equation}
+\end{theorem}
+\begin{proof}
+A harmless candidate chooses at most one vertex per pair. Extend each negative
+query to a maximal one, and represent it by a binary row specifying which vertex
+of each pair it chooses. Covering every candidate of at most $r$ vertices is exactly
+the requirement that every assignment on any $t$ columns occurs in a row. Smaller
+assignments extend to $t$ columns. This proves the equivalence.
+For $t=m$, each binary string requires its own row. For $t=2$, label the columns
+by distinct $\lceil\log_2m\rceil$-bit strings. Use the all-zero and all-one rows,
+and each bit-position row with its complement. Constant rows cover the equal
+assignments; distinct column labels differ at a bit, whose row and complement
+cover both unequal assignments. Finally, any fixed $t$ columns require their
+$2^t$ assignments in different rows.
+\end{proof}
+Covering arrays are classical \citep{colbourn2004}; the reduction makes the cost of
+the audit's rank claim explicit. By Theorem~\ref{thm:certificate}, adding $m$ positive
+pair witnesses gives a certificate of size at most $m+2+2\lceil\log_2m\rceil$ under a
+trusted rank-two bound. Without that bound, the same target needs $2^m+m$ queries
+in any exact identifying certificate. An externally known tight edge count would
+exclude the extra-edge alternatives and invalidate this particular comparison.
+
+For $b<m$ and $t=\min(r,m)\le b$, a negative mask covers at most $\binom bt$ of the
+$2^t\binom mt$ oriented $t$-subsets. Thus
+\begin{equation}
+ C_{b,r}(\HH_m)\ge\left\lceil\frac{2^t\binom mt}{\binom bt}\right\rceil.
+\end{equation}
+For $b<t$, the negative cover is impossible. Positive edges must also be queryable.
+This combines an intervention-size limit with an order-of-exclusion limit.
+
+\section{Measured losses and abstention}\label{sec:noise}
+A threshold decision from finitely many inputs can corrupt both elimination and
+minimality witnesses. We use a deliberately conservative standard concentration
+wrapper, rather than introduce a new statistical method. For distinct query $i$,
+draw fresh independent losses in $[0,1]$. At sample count $u$, let
+\begin{equation}
+ \epsilon_{i,u}=\sqrt{\frac{\log(\pi^4 i^2u^2/(18\delta))}{2u}}.
+\end{equation}
+Return positive when $\widehat D-\epsilon_{i,u}>\tau$, negative when
+$\widehat D+\epsilon_{i,u}\le\tau$, and otherwise gather more samples or abstain.
+Hoeffding's inequality gives conditional failure probability at most
+$36\delta/(\pi^4i^2u^2)$. Summing over $i,u\ge1$ bounds the probability of \emph{any}
+incorrect accepted label by $\delta$, including adaptive mask choices. On the
+complement event the deterministic results apply unchanged. This justification
+requires fresh samples for each query, not unrestricted reuse of a fixed prompt set.
+A margin $|D(A)-\tau|\ge\gamma$ permits termination once $2\epsilon_{i,u}<\gamma$.
+A sample cap can instead yield a legitimate unresolved measurement. We separately
+report mask requests and total input samples.
+
+\section{Experiments}
+\subsection{Protocols and comparison objectives}
+All runs use CPU computation. Synthetic oracles are exact and neural intervention
+tables are exhaustively enumerated. Truth is used only for evaluation and optimal-
+certificate calculations; discovery and stopping receive only queried labels.
+The release contains seeds, raw rows, an example transcript, model weights for seed
+zero, exact optimizer outputs, tests, and scripts regenerating the tables and figures.
+The 2,880-audit synthetic sweep plus neural and noise suites took 251.46 seconds in
+our recorded container run. The additional rank sweep and independent proof checks
+are separate runs; these are not laptop timing guarantees.
+
+\textbf{Baselines.} Random~+~deletion shares the residual ledger and minimal-set
+extractor with our method, but samples uniformly among largest-size informative
+masks avoiding known edges. This isolates the outer scheduling decision. SIGHT-style
+uses binary-prefix extraction followed by deletion verification. RC-style uses
+random shrinking (twenty trials per reduction), then increasing-order subset tests;
+a repeatedly unproductive pool falls back to deletion after three failures. Both
+use the shared full-recovery scheduler, rather than the original one-edge sampling
+protocols of \citet{clarfeld2019}. Increasing-order enumeration tests candidate
+orders from smallest upward and skips already explained or excluded candidates.
+The pairs-only control refuses to claim completeness while higher-order candidates
+remain. We do not present these adaptations as tuned reproductions of all published
+implementations, nor compare their query counts to transformer-specific CoAx scores.
+
+\subsection{Independent checks of the mathematical statements}
+We enumerate all 167 monotone functions on four components with harmless empty mask.
+Across all declared ranks and intervention ceilings from one to four, 1,848 cases
+satisfy the predicted identifiability characterization exactly. For each of the
+1,254 identifiable cases we solve a separate integer program selecting a minimum
+transcript that distinguishes the target from \emph{every} alternative hypothesis.
+Its optimum equals $C+s$, computed by an independent negative-cover program.
+Coverage-directed auditing recovers each target, passes the transcript checker, and
+satisfies~\eqref{eq:mainbound}. An additional 332 rank-three cases check the same
+bounds, and 42 unit tests cover invariants, budgets, noise abstention, and deliberate
+assumption failures. Finite verification supplements, and does not replace, the proofs.
+
+\subsection{Synthetic query efficiency}
+We use twelve units, declared rank three, ceilings $b\in\{3,4,6,8\}$, and twenty seeds.
+The six fixed families are empty; four disjoint triples; eight triples with a shared
+pair; six randomly selected triples; a mixed-order antichain; and all twenty triples
+within a six-unit module. Seeds permute component labels and algorithm tie-breaking;
+the random-triple family also changes structure. Each method is evaluated on the
+same oracle for a given family, ceiling, and seed.
+
+\begin{table}[t]
+\centering\small
+\input{tables/queries.tex}
+\caption{Queries to a checked completeness certificate. Entries are means $\pm$ standard
+errors over twenty seed-wise averages of the six fixed families, not population
+uncertainty over arbitrary circuits. All five methods recover and certify all 480
+instances. The pairs-only control never certifies the rank-three class.}
+\label{tab:queries}
+\end{table}
+
+Table~\ref{tab:queries} shows the main query comparison. At $b=6$, coverage-directed
+selection uses 64.6 queries on average, compared with 80.0 for matched random
+selection. Across all 480 paired instances, it uses fewer queries on 362, the same
+number on 108, and more on 10. The reduction in the overall mean is 11.6\%.
+These are descriptive results on the fixed benchmark, not a universal ordering of
+algorithms. Increasing $b$ does not monotonically improve the greedy scheduler:
+the dense-module family costs 137.2 queries at $b=4$ and 181.0 at $b=8$, where positive
+pool extraction becomes expensive. A larger feasible domain does not force an
+algorithm to choose cost-effective pools.
+
+\begin{figure}[t]
+\centering\includegraphics[width=.78\linewidth]{../figures/query_cost.pdf}
+\caption{Synthetic certificate cost versus intervention ceiling. Error bars follow
+Table~\ref{tab:queries}. Query cost, not optimizer runtime, is the evaluation target.}
+\label{fig:queries}
+\end{figure}
+
+\subsection{Holding the network fixed while changing the claim}
+For six disjoint pairs on twelve units, fix $b=6$ and vary only the declared rank
+$r$. We run four auditors for twenty seeds at each of six ranks (480 runs).
+Integer optimization proves the negative-cover values in Table~\ref{tab:rank}.
+The true mechanism does not change. Coverage-directed discovery finds all six pairs
+at approximately 44 queries for every rank, but certification grows from 46.25 to
+106 queries as higher-order alternatives are admitted.
+
+\begin{table}[t]
+\centering\small\input{tables/rank.tex}
+\caption{The same six failure pairs under different rank assumptions. Discovery is
+an evaluator-only stopping time; certification is the actual audit stopping time.
+Minimum certificate is an oracle-dependent lower benchmark, not an implementable
+policy with advance knowledge of the target. Query uncertainty is over twenty seeds.}
+\label{tab:rank}
+\end{table}
+
+\begin{figure}[t]
+\centering\includegraphics[width=.78\linewidth]{../figures/rank_discovery_gap.pdf}
+\caption{Discovering all true pairs and excluding unobserved higher-order failures
+have different costs. The curves use the same frozen oracle at every rank.}
+\label{fig:rank}
+\end{figure}
+
+A further 100 runs hold $r=12$ and vary $b$ from two to six. At $b=2,3,4,5$, the
+residual contains respectively 656, 496, 256, and 64 candidate sets after all allowed
+inferences have been exhausted. At $b=6$ it is empty. These counts equal
+$\sum_{k=b+1}^{6}2^k\binom6k$ and verify the sharp radius $b_*=6$.
+Separate random-pool experiments match the elementary single-hidden-triple detection
+formula given in Appendix~\ref{app:locality}; they are sanity checks, not evidence
+that coverage-directed scheduling is optimal.
+
+\subsection{Small trained networks}
+We train twenty ReLU classifiers: ten seeds each with nonnegative and signed final
+readouts. Inputs are all 256 vectors in $\{-1,1\}^8$; the target is the nonnegative
+sum of the first four bits. Hidden width is 32, grouped into eight fixed intervention
+units. Adam uses learning rate 0.02 for 1,200 full-domain steps with independent
+20\% group dropout. We freeze each model and enumerate all 256 masks under zero and
+mean replacement, giving forty model/policy conditions and 2,621,440 mask--input
+pairs. The discrepancy is prediction disagreement and $\tau=0.10$.
+All models attain 100\% accuracy on this finite training/evaluation universe; we make
+no held-out distributional-generalization claim.
+
+The positive-readout, zero-replacement setting has a structural monotonicity proof
+(Appendix~\ref{app:neural}). Exhaustive adjacent-mask checks also happen to find no
+violations in the other sampled settings; this is an empirical property of these
+models, not a guarantee for signed readouts or mean replacement. Actual minimal
+failure sets are obtained from each frozen model's response table, never assumed
+from the task or architecture. All auditors use $r=b=n=8$, without access to the true
+failure order. The 160 audits all recover their exact tables and pass the certificate
+checker. Precomputing the full tables is a validation cost, not counted as queries
+available to discovery.
+
+\begin{table}[t]
+\centering\small\setlength{\tabcolsep}{4pt}\input{tables/neural.tex}
+\caption{Means across ten seeds per model/policy condition. ``Max. rank'' is the
+range of each model's largest minimal failure-set size. Last four columns count
+queries to a certificate. All methods are exact on these forty conditions.}
+\label{tab:neural}
+\end{table}
+
+The results delimit the scheduling advantage. On positive-readout zero-ablation,
+coverage-directed and random selection use 38.5 and 38.4 queries, respectively;
+increasing-order enumeration uses 253.3. Under positive-readout mean replacement,
+increasing order instead uses 32.5 queries, versus 71.4 for coverage-directed
+selection. Thus the neural experiments validate conditional correctness and the
+importance of intervention semantics, not uniform superiority of our scheduler.
+
+\subsection{Noise and explicit assumption failures}
+For an eight-unit two-triple oracle, set each query's Bernoulli loss mean to
+$0.5+\gamma$ if harmful and $0.5-\gamma$ otherwise, with $\gamma\in\{0.1,0.2\}$.
+At each margin we compare twenty confidence-wrapped runs ($\delta=0.05$) with twenty
+runs that threshold a fixed batch of 32 samples. The confidence wrapper resolves
+labels at geometrically increasing sample counts, capped at 262,144 per query.
+
+\begin{table}[t]
+\centering\small\setlength{\tabcolsep}{4pt}\input{tables/noise.tex}
+\caption{Noisy auditing. ``Checked cert.'' passes the independent transcript checker;
+``False cert.'' passes that checker but identifies the wrong true oracle. The checked
+false count excludes contradictions already caught by the checker. Mask and sample
+columns are means; success columns count twenty runs.}
+\label{tab:noise}
+\end{table}
+
+All forty confidence-wrapped runs are exact with no erroneous accepted labels, at
+substantially greater sample cost. The fixed-batch baseline produces seven false
+\emph{checked} certificates across forty runs; an additional five incorrect stopping
+claims are caught by the checker. Forty successful confidence runs do not themselves
+establish the statistical guarantee; its justification is the concentration argument.
+
+We also construct assumption failures from a frozen trained network. Add two constant
+hidden units with equal and opposite final contributions $+a,-a$, where
+$a>\max_x|f_{\rm logit}(x)|$. Clean logits are unchanged. Considering these two units
+as the intervention universe yields $B(\{1\})=B(\{2\})=1$ but $B(\{1,2\})=0$.
+The monotone audit can query the pair, see a negative response, and issue a
+\emph{conditional} empty-hypergraph certificate that is wrong for this non-monotone
+network. The transcript has no contradiction. Likewise, declaring rank two and
+allowing only pairs on a trained higher-order model yields an unsupported empty
+explanation. Allowing a larger query exposes a rank violation and triggers an
+explicit warning. These are constructive controls, not claims that such patterns
+occur naturally at a measured frequency.
+
+\section{Related work and limitations}
+\textbf{Prior mathematics.} Hidden-hypergraph and monotone-DNF learning already
+provide identification algorithms, lower bounds, and independent-cover constructions
+\citep{angluin2006,abasi2014,chen2026}. Our negative certificate and covering-array
+objects are specializations of classical constructions, and harmonic charging is
+standard \citep{chvatal1979,colbourn2004}. The proposed technical emphasis is the
+single certificate-relative charge across adaptive discoveries under bounded
+interventions, together with a rank-sensitive interpretation of completeness.
+We do not claim improved unrestricted worst-case hypergraph-learning complexity.
+
+\textbf{Interpretability and group testing.} Formal mechanistic interpretability
+uses verification to provide circuit guarantees with different minimality and
+robustness objectives \citep{hadad2026}. CoAx studies conditional backup recovery
+and transformer self-repair \citep{gong2026}; its seeded component-level objective
+differs from recovery of an entire higher-order failure hypergraph. SIGHT and Random
+Chemistry motivate our group-extraction baselines \citep{clarfeld2019}. Sparse
+M\"obius methods recover polynomial interactions under corresponding sparsity
+assumptions \citep{kang2024}; sparsity of minimal positive terms is not the same as
+sparsity of a Boolean polynomial after inclusion--exclusion. We have not benchmarked
+these external implementations on their native tasks.
+
+\textbf{What is not certified.} The model class may be false: signed effects,
+restoration under additional ablations, context-specific thresholds, or an incorrect
+rank bound can invalidate inference. A certificate concerns the fixed $P$, policy,
+components, and threshold in~\eqref{eq:behavior}; changing them changes the question.
+It does not recover a unique causal graph, assign semantic equivalence to redundant
+units, or certify behavior on unobserved distributions. The noise guarantee requires
+fresh sampling and makes no claim of sample-optimality. Finally, exact mask selection
+and residual enumeration can be exponential; scaling computation without losing the
+query guarantee is an unresolved engineering and theoretical extension of this work.
+
+\section{Conclusion}
+Finding dependencies and certifying their completeness require different evidence.
+We characterize the intervention radius and certificate size, prove a
+certificate-relative adaptive bound, and isolate the exponential cost of excluding
+higher-order alternatives. The experiments show both gains and failures of greedy
+scheduling. A defensible explanation must retain its intervention scope,
+structural assumptions, labeled evidence, and unresolved alternatives.
+
+\input{references.tex}
+
+\appendix
+\section{Elementary locality calculation}\label{app:locality}
+Let there be either no failure edge or one hidden $k$-set $T$, with
+$B_T(A)=\ind\{T\subseteq A\}$. If $b<k$, every allowed query returns zero in both
+cases. If $b\ge k$, each allowed mask covers at most $\binom bk$ of the $\binom nk$
+possible targets. Thus the all-negative branch of any exact audit certifying absence
+requires at least $\lceil\binom nk/\binom bk\rceil$ queries. Adaptivity does not
+change this covering argument along that branch. This is only a counting lower
+bound; an optimal covering design may require more masks.
+
+An independently sampled uniform size-$b$ mask contains a fixed target with
+probability $p=\binom bk/\binom nk$, so the probability of discovery after $Q$ masks
+is $1-(1-p)^Q$. We simulate actual hypergeometric overlaps for $n=32,k=3$, seven
+ceilings, five budgets, and 2,000 trials per cell. The exact limits at $b=4$ and $b=8$
+are 1,240 and 89 queries, respectively, for the counting lower bound.
+
+\begin{figure}[h]
+\centering\includegraphics[width=.75\linewidth]{../figures/locality.pdf}
+\caption{Single-hidden-triple sanity check. Lines give the analytic random-pool
+detection probability; markers are empirical frequencies. These curves describe
+random sampling, not a zero-error completeness certificate.}
+\end{figure}
+
+\section{Why the constrained neural model is monotone}\label{app:neural}
+Write the unablated logit as $z(x)=c+\sum_{j=1}^{n}v_j(x)$, where each group
+contribution $v_j(x)$ is nonnegative. Zero-ablation gives
+$z_A(x)=c+\sum_{j\notin A}v_j(x)$. Consequently $A\subseteq A'$ implies
+$z_{A'}(x)\le z_A(x)$. If the unablated prediction is negative, it stays negative;
+if positive, nested ablations can change it only once, from positive to negative.
+Thus $\ind\{\widehat y_A(x)\ne\widehat y_\varnothing(x)\}$ is monotone for every
+input. Expectation over inputs and thresholding preserve monotonicity.
+
+Mean replacement instead removes $v_j(x)-\E[v_j(x)]$, which need not be nonnegative.
+Signed readouts also lose the sign argument. Our finite-table checks for these
+settings are additional measurements, not consequences of the architecture.
+The cancellation control is representable by two constant ReLU units with final
+weights $+a$ and $-a$, so it is a neural counterexample with unchanged clean logits,
+not merely an arbitrary Boolean oracle.
+
+\section{Reproducibility, baseline details, and artifact scope}
+The experiment package uses Python, NumPy, SciPy, pandas, matplotlib, and CPU PyTorch.
+The recorded environment uses Python 3.13.5, NumPy 2.3.5, SciPy 1.17.0, pandas 2.2.3,
+matplotlib 3.10.8, and PyTorch 2.10.0+cpu. Training uses one PyTorch thread and
+deterministic algorithms. Algorithms operate on integer bitmasks; bitset candidate
+coverage makes exhaustive twelve-component experiments inexpensive. Model weights
+and discrepancy tables for seed zero are released as JSON; all twenty models are
+reproducible from their training seeds, but checkpoints for the other seeds are not
+included in this release.
+
+The increasing-order baseline is not forced to evaluate every possible mask: it
+shares negative-subset and positive-superset inference with the other methods. Random,
+SIGHT-style, and RC-style schedulers also avoid masks containing known edges and do
+not waste a test on a mask with zero residual coverage. These are stronger common-
+ledger controls than unconditioned random masks. SIGHT-style uses binary-prefix
+extraction and an extra deletion verification; this may cost more than an optimized
+extractor when the minimal edge is large. RC-style may fail to shrink a positive
+pool within its twenty-trial limit; it retries rather than silently discarding that
+pool, and eventually uses deletion. The main theorem concerns coverage-directed
+selection with deletion, not the query complexity of these adaptations.
+
+Negative-cover integer programs are restricted to maximal allowed harmless masks,
+which dominate their harmless subsets for uniform query costs. Solver outputs are
+called optima only when the mixed-integer solver reports optimality. The independent
+minimum-transcript program instead has one constraint per alternative hypothesis:
+at least one selected query must distinguish that alternative from the target.
+The agreement of these independently formulated optimizations is reported only for
+the small cases that were actually solved.
+
+\begin{table}[h]
+\centering\small\input{tables/radius.tex}
+\caption{Intervention-radius sweep with six disjoint pairs, declared rank twelve,
+and twenty tie-breaking seeds per ceiling. All six true pairs are eventually found
+at every ceiling, but only $b=6$ permits full identification.}
+\end{table}
+
+\textbf{Reproduction commands.} From the repository root, install the package with
+its experiment extras, then run \texttt{make test} and \texttt{make experiments}.
+\texttt{make paper} regenerates figures and tables from the released raw records
+and compiles this manuscript. The packaged raw-record archive can be expanded with
+\texttt{python experiments/unpack\_results.py}. No LLM API, downloaded model weights,
+or GPU is used. The full ground-truth enumeration belongs to validation; its cost
+must not be confused with the oracle queries revealed to any auditing algorithm.
+
+\textbf{Release status.} This is a reproducible research manuscript, not a claim of
+acceptance or independent verification. Historical priority of the proposed
+certificate-relative adaptive bound still requires a dedicated external comparison
+with the exact-learning literature. Further practical evaluation should use an
+external circuit benchmark and an optimizer that does not enumerate the whole
+intervention space. The present conclusions are restricted to the proofs and
+finite experiments stated here.
+\end{document}

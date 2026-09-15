@@ -1,0 +1,8 @@
+{
+  "radius_cases": 1848,
+  "minimum_transcript_optimizations": 1254,
+  "antichains": 167,
+  "passed": true,
+  "elapsed_seconds": 5.9115620929999295,
+  "scope": "All nonconstant-one monotone functions on four components; all declared ranks and query ceilings 1..4."
+}
