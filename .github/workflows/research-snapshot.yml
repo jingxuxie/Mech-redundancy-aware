@@ -1,0 +1,33 @@
+name: Research source snapshot
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check Python syntax
+        run: python -m compileall -q src experiments tests
+      - name: Package the exact source and history
+        run: |
+          mkdir -p /tmp/research-snapshot
+          git bundle create /tmp/research-snapshot/repository.bundle --all HEAD
+          git archive --format=tar.gz --output=/tmp/research-snapshot/source.tar.gz HEAD
+          git rev-parse HEAD > /tmp/research-snapshot/COMMIT.txt
+          curl --fail --location --retry 2 --max-time 60 https://media.iclr.cc/Conferences/ICLR2027/iclr-2027-style-files.zip -o /tmp/research-snapshot/iclr-2027-style-files.zip || true
+          cd /tmp/research-snapshot
+          sha256sum * > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-snapshot-${{ github.sha }}
+          path: /tmp/research-snapshot/
+          retention-days: 30
+          if-no-files-found: error
