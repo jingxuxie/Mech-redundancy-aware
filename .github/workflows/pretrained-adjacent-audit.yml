@@ -1,0 +1,141 @@
+name: Pretrained adjacent-mask audit
+on:
+  push:
+    paths: ['.github/workflows/pretrained-adjacent-audit.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      HF_HUB_DISABLE_XET: '1'
+      TOKENIZERS_PARALLELISM: 'false'
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pinned CPU dependencies
+        run: |
+          pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install transformers==4.46.3 numpy==1.26.4 scipy==1.14.1 huggingface_hub==0.26.5
+      - name: Execute pretrained-model audit
+        run: |
+          mkdir -p pretrained-results
+          cat > pretrained-results/run_pretrained.py <<'PY'
+          import os,json,time,hashlib,platform,sys,csv
+          from pathlib import Path
+          import numpy as np
+          import torch
+          import transformers
+          from transformers import AutoTokenizer,GPT2LMHeadModel
+          from huggingface_hub import HfApi
+          from scipy.stats import beta
+          OUT=Path('pretrained-results');start=time.perf_counter()
+          torch.set_num_threads(2);torch.manual_seed(20260922)
+          torch.use_deterministic_algorithms(True)
+          model_id='openai-community/gpt2'
+          revision=HfApi().model_info(model_id).sha
+          tokenizer=AutoTokenizer.from_pretrained(model_id,revision=revision)
+          tokenizer.pad_token=tokenizer.eos_token
+          model=GPT2LMHeadModel.from_pretrained(model_id,revision=revision,use_safetensors=True,attn_implementation='eager').eval()
+          # Full 26-head set from Wang et al. (2022), Appendix K/Table 20.
+          heads=[(9,9),(9,6),(10,0),(10,7),(11,10),(7,9),(8,10),(8,6),(7,3),
+                 (5,5),(5,9),(6,9),(5,8),(0,1),(0,10),(3,0),(4,11),(2,2),
+                 (11,2),(10,6),(10,10),(10,2),(9,7),(10,1),(11,9),(9,0)]
+          assert len(heads)==len(set(heads))==26
+          names=['John','Mary','Tom','Sarah','James','Emily','David','Alice',
+                 'Michael','Anna','Robert','Emma','Daniel','Laura','Mark','Julia']
+          assert all(len(tokenizer.encode(' '+n,add_special_tokens=False))==1 for n in names)
+          templates=['When {a} and {b} went to the store, {b} gave a drink to',
+                     'After {a} and {b} went to the park, {b} gave a book to',
+                     'When {b} and {a} went to the store, {b} gave a drink to',
+                     'After {b} and {a} went to the park, {b} gave a book to']
+          rng=np.random.default_rng(20260922);prompts=[];io=[];subject=[]
+          for k in range(32):
+              a,b=rng.choice(names,size=2,replace=False)
+              prompts.append(templates[k%4].format(a=a,b=b));io.append(a);subject.append(b)
+          enc=tokenizer(prompts,return_tensors='pt',padding=True)
+          tokens=enc['input_ids'];attention=enc['attention_mask'];last=attention.sum(-1)-1
+          io_ids=torch.tensor([tokenizer.encode(' '+n,add_special_tokens=False)[0] for n in io])
+          s_ids=torch.tensor([tokenizer.encode(' '+n,add_special_tokens=False)[0] for n in subject])
+          directions=model.lm_head.weight.detach()[io_ids]-model.lm_head.weight.detach()[s_ids]
+          def head_mask(masks,batch=True):
+              h=torch.ones(12,len(masks)*32 if batch else 1,12,1,1)
+              for k,a in enumerate(masks):
+                  for i,(l,j) in enumerate(heads):
+                      if a&(1<<i):h[l,k*32:(k+1)*32 if batch else 1,j]=0
+              return h
+          @torch.inference_mode()
+          def evaluate(masks):
+              count=len(masks)
+              hidden=model.transformer(input_ids=tokens.repeat(count,1),attention_mask=attention.repeat(count,1),
+                   head_mask=head_mask(masks),use_cache=False).last_hidden_state
+              final=hidden[torch.arange(count*32),last.repeat(count)]
+              return (final*directions.repeat(count,1)).sum(-1).reshape(count,32).cpu().numpy()
+          clean=evaluate([0])[0]
+          # Verify batched mask semantics against separate standard 2D head masks.
+          check_masks=[1,3];batched=evaluate(check_masks)
+          errors=[]
+          for j,a in enumerate(check_masks):
+              h=torch.ones(12,12)
+              for i,(l,k) in enumerate(heads):
+                  if a&(1<<i):h[l,k]=0
+              with torch.inference_mode():
+                  hidden=model.transformer(input_ids=tokens,attention_mask=attention,head_mask=h,use_cache=False).last_hidden_state
+                  alone=(hidden[torch.arange(32),last]*directions).sum(-1).numpy()
+              errors.append(float(np.max(np.abs(alone-batched[j]))))
+          assert max(errors)<1e-4,errors
+          rows=[];maskset={0}
+          for probability in (.2,.5):
+              for draw in range(256):
+                  i=int(rng.integers(26));a=sum(1<<j for j in range(26) if j!=i and rng.random()<probability);b=a|(1<<i)
+                  rows.append(dict(probability=probability,draw=draw,lower=a,upper=b,added_head=i));maskset.update([a,b])
+          masks=sorted(maskset);values={0:clean}
+          for k in range(0,len(masks),2):
+              group=masks[k:k+2];out=evaluate(group)
+              values.update({a:v for a,v in zip(group,out)})
+              if k%100==0:print('evaluated',k,'of',len(masks),'elapsed',time.perf_counter()-start,flush=True)
+          all_logits=np.stack([values[a] for a in masks]);risk=(all_logits>0)!=(clean>0)[None,:]
+          D={a:float(r.mean()) for a,r in zip(masks,risk)}
+          np.savez_compressed(OUT/'logits.npz',masks=np.array(masks,dtype=np.int64),logit_differences=all_logits,
+                              clean_logit_differences=clean,disagreements=risk,tokens=tokens.numpy(),attention=attention.numpy())
+          for row in rows:
+              row['lower_discrepancy']=D[row['lower']];row['upper_discrepancy']=D[row['upper']]
+              for tau in (.05,.1,.25):row['violation_'+str(tau)]=int(D[row['lower']]>tau and D[row['upper']]<=tau)
+          with (OUT/'adjacent_pairs.csv').open('w') as f:
+              w=csv.DictWriter(f,fieldnames=list(rows[0]));w.writeheader();w.writerows(rows)
+          summary=[]
+          for probability in (.2,.5):
+              rr=[row for row in rows if row['probability']==probability]
+              for tau in (.05,.1,.25):
+                  k=sum(row['violation_'+str(tau)] for row in rr);N=len(rr)
+                  lo=0. if k==0 else float(beta.ppf(.025,k,N-k+1));hi=1. if k==N else float(beta.ppf(.975,k+1,N-k))
+                  summary.append(dict(probability=probability,threshold=tau,violations=k,pairs=N,estimate=k/N,ci_low=lo,ci_high=hi))
+          metadata=dict(model_id=model_id,model_revision=revision,head_count=len(heads),heads=heads,
+              clean_io_accuracy=float(np.mean(clean>0)),clean_mean_logit_difference=float(clean.mean()),
+              prompts=prompts,io_names=io,subject_names=subject,unique_masks=len(masks),mask_input_evaluations=len(masks)*32,
+              patch='zero entire head output at every position; other heads/MLPs remain intact',
+              metric='fraction of fixed 32 prompts changing IO-versus-subject preference relative to unablated model',
+              adjacent_sampling='choose missing coordinate uniformly; other coordinates iid Bernoulli(p)',
+              inference_check_max_error=max(errors),elapsed_seconds=time.perf_counter()-start,
+              python=sys.version,torch=torch.__version__,transformers=transformers.__version__,platform=platform.platform(),
+              summary=summary,note='Intervals condition on fixed prompts/model. No claim about other tasks or input populations.')
+          (OUT/'summary.json').write_text(json.dumps(metadata,indent=2)+'\n')
+          print(json.dumps(metadata,indent=2),flush=True)
+          (OUT/'SHA256SUMS').write_text('\n'.join(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name for p in sorted(OUT.iterdir()) if p.is_file())+'\n')
+          PY
+          python pretrained-results/run_pretrained.py | tee pretrained-results/execution.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pretrained-adjacent-audit
+          path: pretrained-results/
+          if-no-files-found: error
+          retention-days: 30
