@@ -1,0 +1,74 @@
+name: Expanded pretrained report
+on:
+  push:
+    paths:
+      - 'experiments/pretrained_report_v4.py'
+      - '.github/workflows/expanded-pretrained-report.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  shard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      matrix:
+        patch: [zero, mean]
+        shard: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pinned CPU environment
+        run: |
+          pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install transformers==4.44.2 numpy==1.26.4 scipy==1.14.1 safetensors==0.4.5
+      - name: Execute independent computational shard
+        env:
+          TOKENIZERS_PARALLELISM: 'false'
+          OMP_NUM_THREADS: '2'
+        run: python experiments/pretrained_report_v4.py shard --patch ${{ matrix.patch }} --shard ${{ matrix.shard }} --output results/${{ matrix.patch }}-${{ matrix.shard }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: expanded-${{ matrix.patch }}-${{ matrix.shard }}
+          path: results/${{ matrix.patch }}-${{ matrix.shard }}/
+          retention-days: 30
+          if-no-files-found: error
+  report:
+    needs: shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        patch: [zero, mean]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pinned CPU environment
+        run: |
+          pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install transformers==4.44.2 numpy==1.26.4 scipy==1.14.1 safetensors==0.4.5
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: expanded-${{ matrix.patch }}-*
+          path: incoming
+      - name: Freeze explanation and run falsification and validation
+        env:
+          TOKENIZERS_PARALLELISM: 'false'
+          OMP_NUM_THREADS: '2'
+        run: python experiments/pretrained_report_v4.py finalize --patch ${{ matrix.patch }} --input incoming --output results/report-${{ matrix.patch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: expanded-report-${{ matrix.patch }}
+          path: results/report-${{ matrix.patch }}/
+          retention-days: 30
+          if-no-files-found: error
